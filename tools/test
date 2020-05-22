@@ -1,4 +1,0 @@
-#!/bin/sh -xe
-flake8 simplecpreprocessor
-py.test -v --cov=simplecpreprocessor --cov-config .coveragerc
-
