@@ -1,5 +1,0 @@
-[run]
-omit =
-   simplecpreprocessor/__init__.py
-   simplecpreprocessor/__main__.py
-   simplecpreprocessor/test_*.py
