@@ -455,6 +455,16 @@ def test_tab_macro_indentation():
     run_case(f_obj, expected)
 
 
+def test_malformed_undef_with_whitespace_only():
+    f_obj = FakeFile("header.h", ["#undef    \n"])
+    run_case(f_obj, expected="")
+
+
+def test_process_undef_not_defined():
+    f_obj = FakeFile("header.h", ["#undef FOO\n", "FOO"])
+    run_case(f_obj, expected="FOO")
+
+
 def test_space_pragma_pack_passthrough():
     instructions = (
         "#pragma pack(push, 8)\n",
