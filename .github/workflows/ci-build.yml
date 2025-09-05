@@ -8,6 +8,7 @@ on:
 
 jobs:
   test:
+    name: Build, test and generate coverage report
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4.1.7
@@ -27,6 +28,7 @@ jobs:
           path: coverage.xml
 
   upload-coverage:
+    name: Publish coverage report
     needs: test
     # Disabled for fork PR's as we can't use OIDC there
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
