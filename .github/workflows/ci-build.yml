@@ -1,17 +1,45 @@
 name: Test build
-on: [pull_request]
+
+on:
+  pull_request:
+
 jobs:
-  Application-Test:
+  test:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v2
-    - uses: ./.github/actions/prepare-build
-    - run: |
-        flit build
-        flit install
-        flake8 simplecpreprocessor
-        py.test -v --cov=simplecpreprocessor --cov-config .coveragerc --cov-report=xml
-    - uses: codecov/codecov-action@v1
-      with:
-        files: ./coverage.xml
-        fail_ci_if_error: true
+      - uses: actions/checkout@v4.1.7
+
+      - uses: ./.github/actions/prepare-build
+
+      - run: |
+          flit build
+          flit install
+          flake8 simplecpreprocessor
+          py.test -v --cov=simplecpreprocessor --cov-config .coveragerc --cov-report=xml
+
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4.3.3
+        with:
+          name: coverage
+          path: coverage.xml
+
+  upload-coverage:
+    needs: test
+    # Only run for same-repo PRs (skip forks where OIDC is unavailable)
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write   # Required for OIDC
+    steps:
+      - uses: actions/download-artifact@v4.1.8
+        with:
+          name: coverage
+
+      - name: Upload to Codecov via OIDC
+        uses: codecov/codecov-action@v5.5.0
+        with:
+          files: ./coverage.xml
+          use_oidc: true
+          fail_ci_if_error: true
+          verbose: true
