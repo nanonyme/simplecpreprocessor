@@ -1,33 +1,39 @@
-name: Test build
+name: Publish to PyPI
+
 on:
   push:
     tags:
       - v*
+
 jobs:
   Application-Build:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v2
-    - uses: ./.github/actions/prepare-build
-    - run: |
-        VERSION=$(git describe --tags)
-        echo "__version__ = \"$VERSION\"" > simplecpreprocessor/version.py
-        flit build
-    - uses: actions/upload-artifact@v3
-      with:
-        name: dist
-        path: dist
+      - uses: actions/checkout@v4.1.7
+
+      - uses: ./.github/actions/prepare-build
+
+      - run: |
+          VERSION=$(git describe --tags)
+          echo "__version__ = \"$VERSION\"" > simplecpreprocessor/version.py
+          flit build
+
+      - uses: actions/upload-artifact@v4.3.3
+        with:
+          name: dist
+          path: dist
 
   Application-Release:
     runs-on: ubuntu-latest
     needs: [Application-Build]
     environment: pypi
     permissions:
-      id-token: write
+      id-token: write   # Required for PyPI Trusted Publisher (OIDC)
     steps:
-    - uses: actions/download-artifact@v4.1.7
-      with:
-        name: dist
-        path: dist
-    - name: Publish package distributions to PyPI
-      uses: pypa/gh-action-pypi-publish@release/v1
+      - uses: actions/download-artifact@v4.1.8
+        with:
+          name: dist
+          path: dist
+
+      - name: Publish package distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
