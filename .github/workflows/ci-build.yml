@@ -1,7 +1,10 @@
 name: Test build
 
 on:
+  push:
+    branches: [ main ]
   pull_request:
+    branches: [ main ]
 
 jobs:
   test:
@@ -25,8 +28,8 @@ jobs:
 
   upload-coverage:
     needs: test
-    # Only run for same-repo PRs (skip forks where OIDC is unavailable)
-    if: github.event.pull_request.head.repo.full_name == github.repository
+    # Disabled for fork PR's as we can't use OIDC there
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     permissions:
       contents: read
