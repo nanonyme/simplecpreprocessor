@@ -151,8 +151,8 @@ class Preprocessor(object):
         for token in chunk:
             if not token.whitespace:
                 undefine = token.value
-                break
-        del self.defines[undefine]
+                del self.defines[undefine]
+                return
 
     def process_source_chunks(self, chunk):
         if not self.ignore:
