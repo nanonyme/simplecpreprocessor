@@ -11,7 +11,7 @@ jobs:
         flit install
         flake8 simplecpreprocessor
         py.test -v --cov=simplecpreprocessor --cov-config .coveragerc --cov-report=xml
-    - uses: codecov/codecov-action@v1
+    - uses: codecov/codecov-action@v5.5.0
       with:
         files: ./coverage.xml
         fail_ci_if_error: true
