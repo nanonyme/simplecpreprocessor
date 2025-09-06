@@ -17,11 +17,3 @@ dynamic = ["version", "description"]
 
 [project.scripts]
 simplecpreprocessor = "simplecpreprocessor.__main__:main"
-
-[project.optional-dependencies]
-test = [
-    "pytest>=3.6",
-    "flake8",
-    "pytest-cov",
-    "mock"
-]
