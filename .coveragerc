@@ -3,4 +3,4 @@ branch = True
 omit =
    simplecpreprocessor/__init__.py
    simplecpreprocessor/__main__.py
-   simplecpreprocessor/tests
+   simplecpreprocessor/tests/*.py
