@@ -2,11 +2,12 @@ from __future__ import absolute_import
 import pytest
 import ntpath
 from simplecpreprocessor import preprocess
-from simplecpreprocessor.core import Preprocessor
+from simplecpreprocessor.core import Preprocessor, Tag, constants_to_token_constants
 from simplecpreprocessor.exceptions import ParseError, UnsupportedPlatform
 from simplecpreprocessor.platform import (calculate_platform_constants,
                                           extract_platform_spec)
 from simplecpreprocessor.filesystem import FakeFile, FakeHandler
+from simplecpreprocessor import tokens, exceptions
 import posixpath
 import os
 import cProfile
@@ -730,3 +731,292 @@ def test_platform():
     system = platform.system()
     bitness, _ = platform.architecture()
     assert extract_platform_spec() == (system, bitness)
+
+
+def make_token(val, type_=tokens.TokenType.IDENTIFIER, ws=False):
+    if ws:
+        return tokens.Token.from_string(None, val, tokens.TokenType.WHITESPACE)
+    return tokens.Token.from_constant(None, val, type_)
+
+
+def test_process_define_assign_and_ignore():
+    p = Preprocessor()
+    # define when ignore True should be no-op
+    p.ignore = True
+    chunk = [make_token('NAME'), make_token(' ', type_=tokens.TokenType.WHITESPACE, ws=True)]
+    p.process_define(chunk=chunk)
+    assert 'NAME' not in p.defines.defines
+
+    # define assignment when not ignored
+    p2 = Preprocessor()
+    chunk2 = [make_token('FOO'), make_token(' ', type_=tokens.TokenType.WHITESPACE, ws=True), make_token('1'), make_token('\n', type_=tokens.TokenType.NEWLINE, ws=True)]
+    p2.process_define(chunk=chunk2)
+    assert 'FOO' in p2.defines.defines
+    # the stored define should be the middle token list (value '1')
+    stored = p2.defines.get('FOO')
+    assert any(t.value == '1' for t in stored)
+
+
+def test_process_pragma_pack_and_once():
+    p = Preprocessor()
+    # need a header on the stack for pragma once
+    p.header_stack.append(FakeFile('hdr.h', []))
+    # pragma once
+    list(p.process_pragma(chunk=[make_token('once')], line_no=1))
+    assert p.include_once.get('hdr.h') == Tag.PRAGMA_ONCE
+
+    # pragma pack yields values
+    chunk = [make_token('pack'), make_token('('), make_token('4'), make_token(')')]
+    out = list(p.process_pragma(chunk=chunk, line_no=2))
+    assert '#pragma' in out
+    assert '(' in out and '4' in out
+
+
+def test_ifdef_ifndef_branches_and_undef():
+    p = Preprocessor()
+    # ensure name not in defines to trigger ignore True
+    chunk = [make_token('X')]
+    p.process_ifdef(chunk=chunk, line_no=1)
+    assert p.ignore is True
+    # reset and add define to test else branch
+    p2 = Preprocessor()
+    p2.defines['X'] = [make_token('1')]
+    p2.process_ifdef(chunk=chunk, line_no=1)
+    assert any(c[0] == Tag.IFDEF for c in p2.constraints)
+
+    # process_ifndef: when condition in defines should set ignore True
+    p3 = Preprocessor()
+    p3.defines['Y'] = [make_token('1')]
+    p3.process_ifndef(chunk=[make_token('Y')], line_no=1)
+    assert p3.ignore is True
+
+    # process_undef removes define
+    p4 = Preprocessor()
+    p4.defines['Z'] = [make_token('1')]
+    p4.process_undef(chunk=[make_token('Z')])
+    assert 'Z' not in p4.defines.defines
+
+
+def test_process_source_chunks_folding_and_expansion():
+    p = Preprocessor(fold_strings_to_null=True)
+    # TokenExpander will return tokens as given; test fold_strings_to_null
+    s_tok = tokens.Token.from_constant(None, '"s"', tokens.TokenType.STRING)
+    out = list(p.process_source_chunks([s_tok]))
+    assert out == ['NULL']
+
+    p2 = Preprocessor(fold_strings_to_null=False)
+    out2 = list(p2.process_source_chunks([tokens.Token.from_constant(None, 'x', tokens.TokenType.IDENTIFIER)]))
+    assert out2 == ['x']
+
+
+def test_skip_file_branches():
+    p = Preprocessor()
+    name = 'a.h'
+    p.include_once[name] = Tag.PRAGMA_ONCE
+    assert p.skip_file(name) is True
+    p.include_once[name] = None
+    assert p.skip_file(name) is False
+    # IFDEF case
+    p.include_once[name] = ('COND', Tag.IFDEF)
+    # if 'COND' not in defines, skip_file should return True
+    assert p.skip_file(name) is True
+    # IFNDEF case
+    p.include_once[name] = ('COND', Tag.IFNDEF)
+    p.defines['COND'] = [make_token('1')]
+    assert p.skip_file(name) is True
+
+
+def test__read_header_raises_on_missing():
+    fh = FakeHandler({})
+    p = Preprocessor(header_handler=fh)
+    # try reading header not present; should raise the given error
+    gen = p._read_header('nope.h', exceptions.ParseError('missing'))
+    with pytest.raises(exceptions.ParseError):
+        next(gen)
+
+
+def test_process_include_error_cases():
+    p = Preprocessor()
+    # empty include name
+    with pytest.raises(exceptions.ParseError):
+        p.process_include(line_no=1, chunk=[make_token(' ', ws=True)])
+
+    # invalid string include (bad formatting)
+    bad_string = tokens.Token.from_constant(None, 'notquoted', tokens.TokenType.STRING)
+    with pytest.raises(exceptions.ParseError):
+        p.process_include(line_no=1, chunk=[bad_string])
+
+    # angle bracket missing '>' because newline encountered
+    with pytest.raises(exceptions.ParseError):
+        p.process_include(line_no=2, chunk=[make_token('<'), tokens.Token.from_string(None, '\n', tokens.TokenType.NEWLINE)])
+
+    # angle bracket missing '>' because iterator exhausted
+    with pytest.raises(exceptions.ParseError):
+        p.process_include(line_no=3, chunk=[make_token('<'), make_token('a')])
+
+
+def test_check_fullfile_guard_sets_include_once():
+    p = Preprocessor()
+    # set last_constraint with begin == 0
+    p.last_constraint = ('GUARD', Tag.IFDEF, 0)
+    p.header_stack.append(FakeFile('guard.h', []))
+    p.check_fullfile_guard()
+    assert p.include_once.get('guard.h') == ('GUARD', Tag.IFDEF)
+
+
+def test_process_define_with_leading_whitespace_and_ifdef_whitespace():
+    p = Preprocessor()
+    # leading whitespace tokens before name
+    chunk = [tokens.Token.from_string(None, '  ', tokens.TokenType.WHITESPACE),
+             tokens.Token.from_string(None, '\t', tokens.TokenType.WHITESPACE),
+             tokens.Token.from_constant(None, 'LW', tokens.TokenType.IDENTIFIER),
+             tokens.Token.from_string(None, ' ', tokens.TokenType.WHITESPACE),
+             tokens.Token.from_constant(None, '1', tokens.TokenType.IDENTIFIER),
+             tokens.Token.from_string(None, '\n', tokens.TokenType.NEWLINE)]
+    p.process_define(chunk=chunk)
+    assert 'LW' in p.defines.defines
+
+    # ifdef with leading whitespace
+    p2 = Preprocessor()
+    chunk2 = [tokens.Token.from_string(None, ' ', tokens.TokenType.WHITESPACE),
+              tokens.Token.from_constant(None, 'COND', tokens.TokenType.IDENTIFIER)]
+    p2.process_ifdef(chunk=chunk2, line_no=10)
+    assert any(c[0] == Tag.IFDEF for c in p2.constraints)
+
+
+def test_process_pragma_unsupported_raises():
+    p = Preprocessor()
+    with pytest.raises(exceptions.ParseError):
+        # pragma token value that doesn't map to a handler
+        list(p.process_pragma(chunk=[tokens.Token.from_constant(None, 'bogus', tokens.TokenType.IDENTIFIER)], line_no=5))
+
+
+def test_process_include_prefixed_string_extracts_header():
+    # ensure header extraction for prefixes like u8"file"
+    handler = FakeHandler({'file.h': ['x\n']})
+    p = Preprocessor(header_handler=handler)
+    p.header_stack.append(FakeFile('current.h', []))
+    tok = tokens.Token.from_constant(None, 'u8"file.h"', tokens.TokenType.STRING)
+    # process_include returns a generator (from _read_header) but header extraction runs first
+    gen = p.process_include(line_no=1, chunk=[tok])
+    # consuming the generator should not raise (header exists in FakeHandler)
+    list(gen)
+
+
+def _collect_chunk_strings(chunk):
+    return "".join(t.value for t in chunk)
+
+
+def test_token_from_string_and_constant():
+    t1 = tokens.Token.from_string(5, "   ", tokens.TokenType.WHITESPACE)
+    assert t1.line_no == 5
+    assert t1.value == "   "
+    assert t1.type is tokens.TokenType.WHITESPACE
+    assert t1.whitespace is True
+
+    t2 = tokens.Token.from_constant(1, "X", tokens.TokenType.IDENTIFIER)
+    assert t2.whitespace is False
+    assert t2.chunk_mark is False
+    t2.chunk_mark = True
+    assert t2.chunk_mark is True
+
+
+def test_is_string_with_token_and_raw():
+    s_tok = tokens.Token.from_constant(0, '"abc"', tokens.TokenType.STRING)
+    assert tokens.is_string(s_tok) is True
+
+    assert tokens.is_string('"hello"') is True
+    assert tokens.is_string('L"wchar"') is True
+    assert tokens.is_string('u8"hello"') is True
+
+    assert tokens.is_string(123) is False
+    assert tokens.is_string(tokens.Token.from_constant(0, "x", tokens.TokenType.IDENTIFIER)) is False
+
+
+def test_tokenexpander_simple_and_cycle():
+    one = tokens.Token.from_constant(None, "1", tokens.TokenType.IDENTIFIER)
+    a = tokens.Token.from_constant(None, "A", tokens.TokenType.IDENTIFIER)
+    b = tokens.Token.from_constant(None, "B", tokens.TokenType.IDENTIFIER)
+
+    defines = {"A": [one], "B": [a]}
+    exp = tokens.TokenExpander(defines)
+    out = list(exp.expand_tokens([b]))
+    assert [t.value for t in out] == ["1"]
+
+    x = tokens.Token.from_constant(None, "X", tokens.TokenType.IDENTIFIER)
+    y = tokens.Token.from_constant(None, "Y", tokens.TokenType.IDENTIFIER)
+    cyc = {"X": [y], "Y": [x]}
+    exp2 = tokens.TokenExpander(cyc)
+    out2 = list(exp2.expand_tokens([x]))
+    assert any(t.value in ("X", "Y") for t in out2)
+
+
+def test_tokenizer_read_chunks_with_and_without_trailing_newline():
+    f = FakeFile("f.h", ["one\n", "two\n"]) 
+    tok = tokens.Tokenizer(f, line_ending="\n")
+    chunks = list(tok.read_chunks())
+    assert len(chunks) == 2
+    assert _collect_chunk_strings(chunks[0]) == "one\n"
+    assert _collect_chunk_strings(chunks[1]) == "two\n"
+
+    f2 = FakeFile("f.h", ["alpha\n", "beta"]) 
+    tok2 = tokens.Tokenizer(f2, line_ending="\n")
+    chunks2 = list(tok2.read_chunks())
+    assert len(chunks2) == 2
+    assert _collect_chunk_strings(chunks2[0]) == "alpha\n"
+    assert _collect_chunk_strings(chunks2[1]) == "beta"
+
+
+def test_scan_line_tokenizes_unterminated_string():
+    f = FakeFile("f.h", ['"unterminated\n'])
+    tok = tokens.Tokenizer(f, line_ending="\n")
+    chunks = list(tok.read_chunks())
+    assert len(chunks) >= 1
+    text = "".join(t.value for t in chunks[0])
+    assert '"' in text and 'unterminated' in text
+
+
+def test_whitespace_before_hash_and_comment_start_is_ignored():
+    f = FakeFile("f.h", ["   #\n"])
+    tok = tokens.Tokenizer(f, line_ending="\n")
+    chunks = list(tok.read_chunks())
+    values = [t.value for t in chunks[0]]
+    assert "#" in values
+    assert "   " not in values
+
+    f2 = FakeFile("f.h", ["   // comment\n"])
+    tok2 = tokens.Tokenizer(f2, line_ending="\n")
+    chunks2 = list(tok2.read_chunks())
+    vals2 = [t.value for t in chunks2[0]]
+    assert "   " not in vals2
+    assert vals2 == ["\n"]
+
+
+def test_scan_line_raises_syntaxerror_by_fake_scanner():
+    f = FakeFile("f.h", ["x\n"])
+    tok = tokens.Tokenizer(f, line_ending="\n")
+
+    class FakeScanner:
+        def scan(self, line):
+            return ([], "BAD_REMAINDER")
+
+    tok._scanner = FakeScanner()
+    import pytest as _pytest
+    with _pytest.raises(SyntaxError):
+        tok._scan_line(0, "x\n")
+
+
+def test_comment_start_and_end_single_line():
+    f = FakeFile("f.h", ["/* comment */\n"])
+    tok = tokens.Tokenizer(f, line_ending="\n")
+    chunks = list(tok.read_chunks())
+    assert len(chunks) == 1
+    assert "".join(t.value for t in chunks[0]) == "\n"
+
+
+def test_multiline_comment_skips_inner_tokens():
+    f = FakeFile("f.h", ["/* start\n", "hello\n", "*/\n", "after\n"])
+    tok = tokens.Tokenizer(f, line_ending="\n")
+    chunks = list(tok.read_chunks())
+    assert any("after" in "".join(t.value for t in c) for c in chunks)
+    assert not any("hello" in "".join(t.value for t in c) for c in chunks)
