@@ -2,7 +2,7 @@ from __future__ import absolute_import
 import pytest
 import ntpath
 from simplecpreprocessor import preprocess
-from simplecpreprocessor.core import Preprocessor, Tag, constants_to_token_constants
+from simplecpreprocessor.core import Preprocessor, Tag
 from simplecpreprocessor.exceptions import ParseError, UnsupportedPlatform
 from simplecpreprocessor.platform import (calculate_platform_constants,
                                           extract_platform_spec)
@@ -743,13 +743,21 @@ def test_process_define_assign_and_ignore():
     p = Preprocessor()
     # define when ignore True should be no-op
     p.ignore = True
-    chunk = [make_token('NAME'), make_token(' ', type_=tokens.TokenType.WHITESPACE, ws=True)]
+    chunk = [
+        make_token('NAME'),
+        make_token(' ', type_=tokens.TokenType.WHITESPACE, ws=True),
+    ]
     p.process_define(chunk=chunk)
     assert 'NAME' not in p.defines.defines
 
     # define assignment when not ignored
     p2 = Preprocessor()
-    chunk2 = [make_token('FOO'), make_token(' ', type_=tokens.TokenType.WHITESPACE, ws=True), make_token('1'), make_token('\n', type_=tokens.TokenType.NEWLINE, ws=True)]
+    chunk2 = [
+        make_token('FOO'),
+        make_token(' ', type_=tokens.TokenType.WHITESPACE, ws=True),
+        make_token('1'),
+        make_token('\n', type_=tokens.TokenType.NEWLINE, ws=True),
+    ]
     p2.process_define(chunk=chunk2)
     assert 'FOO' in p2.defines.defines
     # the stored define should be the middle token list (value '1')
@@ -766,7 +774,12 @@ def test_process_pragma_pack_and_once():
     assert p.include_once.get('hdr.h') == Tag.PRAGMA_ONCE
 
     # pragma pack yields values
-    chunk = [make_token('pack'), make_token('('), make_token('4'), make_token(')')]
+    chunk = [
+        make_token('pack'),
+        make_token('('),
+        make_token('4'),
+        make_token(')')
+    ]
     out = list(p.process_pragma(chunk=chunk, line_no=2))
     assert '#pragma' in out
     assert '(' in out and '4' in out
@@ -805,7 +818,11 @@ def test_process_source_chunks_folding_and_expansion():
     assert out == ['NULL']
 
     p2 = Preprocessor(fold_strings_to_null=False)
-    out2 = list(p2.process_source_chunks([tokens.Token.from_constant(None, 'x', tokens.TokenType.IDENTIFIER)]))
+    out2 = list(
+        p2.process_source_chunks([
+            tokens.Token.from_constant(None, 'x', tokens.TokenType.IDENTIFIER),
+        ])
+    )
     assert out2 == ['x']
 
 
@@ -848,7 +865,13 @@ def test_process_include_error_cases():
 
     # angle bracket missing '>' because newline encountered
     with pytest.raises(exceptions.ParseError):
-        p.process_include(line_no=2, chunk=[make_token('<'), tokens.Token.from_string(None, '\n', tokens.TokenType.NEWLINE)])
+        p.process_include(
+            line_no=2,
+            chunk=[
+                make_token('<'),
+                tokens.Token.from_string(None, '\n', tokens.TokenType.NEWLINE)
+            ],
+        )
 
     # angle bracket missing '>' because iterator exhausted
     with pytest.raises(exceptions.ParseError):
@@ -888,7 +911,13 @@ def test_process_pragma_unsupported_raises():
     p = Preprocessor()
     with pytest.raises(exceptions.ParseError):
         # pragma token value that doesn't map to a handler
-        list(p.process_pragma(chunk=[tokens.Token.from_constant(None, 'bogus', tokens.TokenType.IDENTIFIER)], line_no=5))
+        for _ in p.process_pragma(
+            chunk=[
+                tokens.Token.from_constant(None, 'bogus', tokens.TokenType.IDENTIFIER)
+            ],
+            line_no=5,
+        ):
+            pass
 
 
 def test_process_include_prefixed_string_extracts_header():
@@ -930,7 +959,9 @@ def test_is_string_with_token_and_raw():
     assert tokens.is_string('u8"hello"') is True
 
     assert tokens.is_string(123) is False
-    assert tokens.is_string(tokens.Token.from_constant(0, "x", tokens.TokenType.IDENTIFIER)) is False
+    assert tokens.is_string(
+        tokens.Token.from_constant(0, "x", tokens.TokenType.IDENTIFIER)
+    ) is False
 
 
 def test_tokenexpander_simple_and_cycle():
@@ -952,14 +983,14 @@ def test_tokenexpander_simple_and_cycle():
 
 
 def test_tokenizer_read_chunks_with_and_without_trailing_newline():
-    f = FakeFile("f.h", ["one\n", "two\n"]) 
+    f = FakeFile("f.h", ["one\n", "two\n"])
     tok = tokens.Tokenizer(f, line_ending="\n")
     chunks = list(tok.read_chunks())
     assert len(chunks) == 2
     assert _collect_chunk_strings(chunks[0]) == "one\n"
     assert _collect_chunk_strings(chunks[1]) == "two\n"
 
-    f2 = FakeFile("f.h", ["alpha\n", "beta"]) 
+    f2 = FakeFile("f.h", ["alpha\n", "beta"])
     tok2 = tokens.Tokenizer(f2, line_ending="\n")
     chunks2 = list(tok2.read_chunks())
     assert len(chunks2) == 2
