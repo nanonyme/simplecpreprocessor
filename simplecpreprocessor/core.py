@@ -1,6 +1,7 @@
 import enum
 
 from . import filesystem, tokens, platform, exceptions
+from .tokens import TokenType, is_string
 
 
 class Tag(enum.Enum):
@@ -11,14 +12,14 @@ class Tag(enum.Enum):
 
 
 def constants_to_token_constants(constants):
-    return {key: [tokens.Token.from_string(None, value)]
+    return {key: [tokens.Token.from_string(None, value, TokenType.IDENTIFIER)]
             for key, value in constants.items()}
 
 
 TOKEN_CONSTANTS = constants_to_token_constants(platform.PLATFORM_CONSTANTS)
 
 
-class Defines(object):
+class Defines:
     def __init__(self, base):
         self.defines = base.copy()
 
@@ -35,7 +36,7 @@ class Defines(object):
         return key in self.defines
 
 
-class Preprocessor(object):
+class Preprocessor:
 
     def __init__(self, line_ending=tokens.DEFAULT_LINE_ENDING,
                  include_paths=(), header_handler=None,
@@ -157,7 +158,7 @@ class Preprocessor(object):
     def process_source_chunks(self, chunk):
         if not self.ignore:
             for token in self.token_expander.expand_tokens(chunk):
-                if self.fold_strings_to_null and tokens.is_string(token.value):
+                if self.fold_strings_to_null and is_string(token):
                     yield "NULL"
                 else:
                     yield token.value
@@ -189,22 +190,57 @@ class Preprocessor(object):
     def process_include(self, **kwargs):
         chunk = kwargs["chunk"]
         line_no = kwargs["line_no"]
-        for token in chunk:
-            if not token.whitespace:
-                item = token.value
+
+        # Find first non-whitespace token after #include
+        it = iter(chunk)
+        first = None
+        for tok in it:
+            if not tok.whitespace:
+                first = tok
                 break
-        s = "Line %s includes a file %s that can't be found" % (line_no,
-                                                                item)
-        error = exceptions.ParseError(s)
-        if item.startswith("<") and item.endswith(">"):
-            header = item.strip("<>")
-            return self._read_header(header, error)
-        elif item.startswith('"') and item.endswith('"'):
-            header = item.strip('"')
+
+        if first is None:
+            fmt = "Invalid include on line %s, got empty include name"
+            raise exceptions.ParseError(fmt % line_no)
+
+        # Case 1: #include "header.h" (STRING token)
+        if first.type is TokenType.STRING:
+            item = first.value  # includes quotes (and optional prefix like L, u8)
+            # Accept common prefixes but strip only the surrounding quotes for the header path
+            if item.startswith(("u8\"", "u\"", "U\"", "L\"")) and item.endswith("\""):
+                header = item[item.index("\"")+1:-1]
+            elif item.startswith('"') and item.endswith('"'):
+                header = item.strip('"')
+            else:
+                fmt = "Invalid include on line %s, got %r for include name"
+                raise exceptions.ParseError(fmt % (line_no, item))
+            s = "Line %s includes a file %s that can't be found" % (line_no, item)
+            error = exceptions.ParseError(s)
             return self._read_header(header, error, self.current_name())
-        else:
-            fmt = "Invalid include on line %s, got %r for include name"
-            raise exceptions.ParseError(fmt % (line_no, item))
+
+        # Case 2: #include <header.h> (angle-bracket header-name split into tokens)
+        if first.value == "<":
+            parts = []
+            for tok in it:
+                # Stop at the closing '>'
+                if tok.value == ">":
+                    item = "<" + "".join(parts) + ">"
+                    header = "".join(parts)
+                    s = "Line %s includes a file %s that can't be found" % (line_no, item)
+                    error = exceptions.ParseError(s)
+                    return self._read_header(header, error)
+                # Guard against accidental newline before closing '>'
+                if tok.type is TokenType.NEWLINE:
+                    fmt = "Invalid include on line %s, missing '>'"
+                    raise exceptions.ParseError(fmt % line_no)
+                parts.append(tok.value)
+            # If we ran out of tokens without finding '>'
+            fmt = "Invalid include on line %s, missing '>'"
+            raise exceptions.ParseError(fmt % line_no)
+
+        # Otherwise, invalid form
+        fmt = "Invalid include on line %s, got %r for include name"
+        raise exceptions.ParseError(fmt % (line_no, first.value))
 
     def check_fullfile_guard(self):
         if self.last_constraint is None:
@@ -248,15 +284,18 @@ def preprocess(f_object, line_ending="\n", include_paths=(),
                header_handler=None,
                extra_constants=(),
                ignore_headers=(), fold_strings_to_null=False):
-    r"""
+    """
     This preprocessor yields chunks of text that combined results in lines
     delimited with given line ending. There is always a final line ending.
     """
     platform_constants = platform.PLATFORM_CONSTANTS.copy()
     platform_constants.update(extra_constants)
-    preprocessor = Preprocessor(line_ending, include_paths, header_handler,
-                                constants_to_token_constants(
-                                    platform_constants
-                                ),
-                                ignore_headers, fold_strings_to_null)
+    preprocessor = Preprocessor(
+        line_ending,
+        include_paths,
+        header_handler,
+        constants_to_token_constants(platform_constants),
+        ignore_headers,
+        fold_strings_to_null
+    )
     return preprocessor.preprocess(f_object)
