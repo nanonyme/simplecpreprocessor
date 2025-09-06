@@ -3,3 +3,6 @@
 dist
 htmlcov
 venv
+
+# Visual Studio Code settings
+.vscode/
