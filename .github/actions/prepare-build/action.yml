@@ -4,8 +4,9 @@ runs:
   using: "composite"
   steps:
   - run: |
-      sudo apt update
-      sudo apt install -y git python3-pip python3-testresources
-      python3 -m pip install --upgrade flit pip wheel setuptools
-      echo SOURCE_DATE_EPOCH=`git show -s --format=%ct` >> $GITHUB_ENV
+      python -m venv .venv
+      source .venv/bin/activate
+      echo "VIRTUAL_ENV=$VIRTUAL_ENV" >> $GITHUB_ENV
+      echo "$VIRTUAL_ENV/bin" >> $GITHUB_PATH
+      pip install -r requirements-dev.txt
     shell: bash
