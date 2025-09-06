@@ -2,7 +2,7 @@
 .coverage
 dist
 htmlcov
-venv
+.venv
 
 # Visual Studio Code settings
 .vscode/
