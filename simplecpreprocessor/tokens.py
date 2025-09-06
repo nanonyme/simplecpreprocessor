@@ -42,19 +42,12 @@ class Token:
         )  # pragma: no cover
 
 
-def is_string(value):
+def is_string(value: Token):
     """
     Return True if the given token value is a C/C++ string literal.
     Accepts either a Token or a raw string.
     """
-    if isinstance(value, Token):
-        return value.type is TokenType.STRING
-    if not isinstance(value, str):
-        return False
-    # Fallback regex check for raw strings
-    return bool(
-        re.match(r'^(?:u8|u|U|L)?"([^"\\]|\\.)*"$', value)
-    )
+    return value.type is TokenType.STRING
 
 
 class TokenExpander:
