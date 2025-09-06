@@ -12,8 +12,10 @@ class Tag(enum.Enum):
 
 
 def constants_to_token_constants(constants):
-    return {key: [tokens.Token.from_string(None, value, TokenType.IDENTIFIER)]
-            for key, value in constants.items()}
+    return {
+        key: [tokens.Token.from_string(None, value, TokenType.IDENTIFIER)]
+        for key, value in constants.items()
+    }
 
 
 TOKEN_CONSTANTS = constants_to_token_constants(platform.PLATFORM_CONSTANTS)
@@ -116,7 +118,10 @@ class Preprocessor:
                 pragma = getattr(self, method_name, None)
                 break
         if pragma is None:
-            s = "Unsupported pragma %s on line %s" % (token.value, line_no)
+            s = (
+                "Unsupported pragma %s on line %s"
+                % (token.value, line_no)
+            )
             raise exceptions.ParseError(s)
         else:
             ret = pragma(chunk=chunk, line_no=line_no)
@@ -200,47 +205,66 @@ class Preprocessor:
                 break
 
         if first is None:
-            fmt = "Invalid include on line %s, got empty include name"
-            raise exceptions.ParseError(fmt % line_no)
+            fmt = (
+                "Invalid include on line %s, got empty include name"
+                % line_no
+            )
+            raise exceptions.ParseError(fmt)
 
-        # Case 1: #include "header.h" (STRING token)
+        # Case 1: quoted include
         if first.type is TokenType.STRING:
-            item = first.value  # includes quotes (and optional prefix like L, u8)
-            # Accept common prefixes but strip only the surrounding quotes for the header path
-            if item.startswith(("u8\"", "u\"", "U\"", "L\"")) and item.endswith("\""):
+            item = first.value
+            if (
+                item.startswith(("u8\"", "u\"", "U\"", "L\""))
+                and item.endswith("\"")
+            ):
                 header = item[item.index("\"")+1:-1]
             elif item.startswith('"') and item.endswith('"'):
                 header = item.strip('"')
             else:
-                fmt = "Invalid include on line %s, got %r for include name"
-                raise exceptions.ParseError(fmt % (line_no, item))
-            s = "Line %s includes a file %s that can't be found" % (line_no, item)
+                fmt = (
+                    "Invalid include on line %s, got %r for include name"
+                    % (line_no, item)
+                )
+                raise exceptions.ParseError(fmt)
+            s = (
+                "Line %s includes a file %s that can't be found"
+                % (line_no, item)
+            )
             error = exceptions.ParseError(s)
             return self._read_header(header, error, self.current_name())
 
-        # Case 2: #include <header.h> (angle-bracket header-name split into tokens)
+        # Case 2: angle-bracket include
         if first.value == "<":
             parts = []
             for tok in it:
-                # Stop at the closing '>'
                 if tok.value == ">":
                     item = "<" + "".join(parts) + ">"
                     header = "".join(parts)
-                    s = "Line %s includes a file %s that can't be found" % (line_no, item)
+                    s = (
+                        "Line %s includes a file %s that can't be found"
+                        % (line_no, item)
+                    )
                     error = exceptions.ParseError(s)
                     return self._read_header(header, error)
-                # Guard against accidental newline before closing '>'
                 if tok.type is TokenType.NEWLINE:
-                    fmt = "Invalid include on line %s, missing '>'"
-                    raise exceptions.ParseError(fmt % line_no)
+                    fmt = (
+                        "Invalid include on line %s, missing '>'"
+                        % line_no
+                    )
+                    raise exceptions.ParseError(fmt)
                 parts.append(tok.value)
-            # If we ran out of tokens without finding '>'
-            fmt = "Invalid include on line %s, missing '>'"
-            raise exceptions.ParseError(fmt % line_no)
+            fmt = (
+                "Invalid include on line %s, missing '>'"
+                % line_no
+            )
+            raise exceptions.ParseError(fmt)
 
-        # Otherwise, invalid form
-        fmt = "Invalid include on line %s, got %r for include name"
-        raise exceptions.ParseError(fmt % (line_no, first.value))
+        fmt = (
+            "Invalid include on line %s, got %r for include name"
+            % (line_no, first.value)
+        )
+        raise exceptions.ParseError(fmt)
 
     def check_fullfile_guard(self):
         if self.last_constraint is None:
@@ -259,10 +283,17 @@ class Preprocessor:
                 line_no = chunk[0].line_no
                 macro_name = chunk[1].value
                 macro_chunk = chunk[2:]
-                macro = getattr(self, "process_%s" % macro_name, None)
+                macro = getattr(
+                    self,
+                    "process_%s" % macro_name,
+                    None
+                )
                 if macro is None:
-                    fmt = "Line number %s contains unsupported macro %s"
-                    raise exceptions.ParseError(fmt % (line_no, macro_name))
+                    fmt = (
+                        "Line number %s contains unsupported macro %s"
+                        % (line_no, macro_name)
+                    )
+                    raise exceptions.ParseError(fmt)
                 ret = macro(line_no=line_no, chunk=macro_chunk)
                 if ret is not None:
                     for token in ret:
@@ -274,10 +305,15 @@ class Preprocessor:
         self.header_stack.pop()
         if not self.header_stack and self.constraints:
             constraint_type, name, _, line_no = self.constraints[-1]
-            fmt = "{tag} {name} from line {line_no} left open"
-            raise exceptions.ParseError(fmt.format(tag=constraint_type.value,
-                                                   name=name,
-                                                   line_no=line_no))
+            fmt = (
+                "{tag} {name} from line {line_no} left open"
+                .format(
+                    tag=constraint_type.value,
+                    name=name,
+                    line_no=line_no
+                )
+            )
+            raise exceptions.ParseError(fmt)
 
 
 def preprocess(f_object, line_ending="\n", include_paths=(),
@@ -285,8 +321,8 @@ def preprocess(f_object, line_ending="\n", include_paths=(),
                extra_constants=(),
                ignore_headers=(), fold_strings_to_null=False):
     """
-    This preprocessor yields chunks of text that combined results in lines
-    delimited with given line ending. There is always a final line ending.
+    This preprocessor yields chunks of text that combined result in lines
+    delimited with the given line ending. There is always a final line ending.
     """
     platform_constants = platform.PLATFORM_CONSTANTS.copy()
     platform_constants.update(extra_constants)
