@@ -42,7 +42,7 @@ All contributions must pass linting with no errors.
 Run tests with coverage (matches CI):
 
 ```bash
- py.test -v --cov=simplecpreprocessor --cov-config .coveragerc --cov-report=xml
+ py.test -v --cov=simplecpreprocessor --cov-config .coveragerc --cov-report=term-missing
 ```
 
 Coverage must remain at or above the current threshold. Coverage reports are generated automatically in CI.
