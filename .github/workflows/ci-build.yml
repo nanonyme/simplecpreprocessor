@@ -74,3 +74,4 @@ jobs:
           use_oidc: true
           fail_ci_if_error: true
           verbose: true
+          root_dir: ${{ github.workspace }}
