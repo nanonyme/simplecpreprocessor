@@ -35,7 +35,7 @@ jobs:
           flake8 simplecpreprocessor
 
   test:
-    name: Test with coverage
+    name: Run tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4.1.7
@@ -43,17 +43,10 @@ jobs:
       - uses: ./.github/actions/prepare-build
 
       - run: |
-          py.test -v --cov=simplecpreprocessor --cov-config .coveragerc --cov-report=xml --cov-report=term-missing
-
-      - name: Upload coverage artifact
-        uses: actions/upload-artifact@v4.3.3
-        with:
-          name: coverage
-          path: coverage.xml
+          py.test -v
 
   upload-coverage:
-    name: Publish coverage report
-    needs: test
+    name: Test with coverage and publish report
     # Disabled for fork PR's as we can't use OIDC there
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
@@ -63,9 +56,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4.1.7
 
-      - uses: actions/download-artifact@v4.1.8
-        with:
-          name: coverage
+      - uses: ./.github/actions/prepare-build
+
+      - name: Run tests with coverage
+        run: |
+          py.test -v --cov=simplecpreprocessor --cov-config .coveragerc --cov-report=xml --cov-report=term-missing
 
       - name: Upload to Codecov via OIDC
         uses: codecov/codecov-action@v5.5.0
@@ -74,4 +69,3 @@ jobs:
           use_oidc: true
           fail_ci_if_error: true
           verbose: true
-          root_dir: ${{ github.workspace }}
