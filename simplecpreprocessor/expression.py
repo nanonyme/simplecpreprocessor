@@ -237,7 +237,7 @@ class ExpressionParser:
             if right == 0:
                 raise ZeroDivisionError("Modulo by zero")
             return left % right
-        else:
+        else:  # pragma: no cover
             raise SyntaxError(f"Unknown operator: {op}")
 
 

@@ -87,6 +87,9 @@ class Preprocessor:
             if not tokenized.whitespace:
                 define_name = tokenized.value
                 break
+        else:  # pragma: no cover
+            # Defensive: should never happen as tokenizer ensures non-ws tokens
+            return
         self.defines[define_name] = chunk[i+2:-1]
 
     def process_endif(self, **kwargs):
@@ -122,10 +125,15 @@ class Preprocessor:
     def process_ifdef(self, **kwargs):
         chunk = kwargs["chunk"]
         line_no = kwargs["line_no"]
+        condition = None
         for token in chunk:
             if not token.whitespace:
                 condition = token.value
                 break
+
+        if condition is None:  # pragma: no cover
+            # Defensive: should never happen as tokenizer ensures non-ws tokens
+            return
 
         frame = ConditionFrame(Tag.IFDEF, condition, line_no)
         parent_ignoring = self._should_ignore()
@@ -142,16 +150,21 @@ class Preprocessor:
         chunk = kwargs["chunk"]
         line_no = kwargs["line_no"]
         pragma = None
+        token = None
         for token in chunk:
             if not token.whitespace:
                 method_name = "process_pragma_%s" % token.value
                 pragma = getattr(self, method_name, None)
                 break
         if pragma is None:
-            s = (
-                "Unsupported pragma %s on line %s"
-                % (token.value, line_no)
-            )
+            if token is None:  # pragma: no cover
+                # Defensive: should never happen
+                s = "Unsupported pragma on line %s" % line_no
+            else:
+                s = (
+                    "Unsupported pragma %s on line %s"
+                    % (token.value, line_no)
+                )
             raise exceptions.ParseError(s)
         else:
             ret = pragma(chunk=chunk, line_no=line_no)
@@ -172,10 +185,15 @@ class Preprocessor:
     def process_ifndef(self, **kwargs):
         chunk = kwargs["chunk"]
         line_no = kwargs["line_no"]
+        condition = None
         for token in chunk:
             if not token.whitespace:
                 condition = token.value
                 break
+
+        if condition is None:  # pragma: no cover
+            # Defensive: should never happen as tokenizer ensures non-ws tokens
+            return
 
         frame = ConditionFrame(Tag.IFNDEF, condition, line_no)
         parent_ignoring = self._should_ignore()

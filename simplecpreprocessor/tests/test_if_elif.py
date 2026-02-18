@@ -310,6 +310,22 @@ def test_elif_after_else():
     assert "#elif after #else" in str(excinfo.value)
 
 
+def test_else_after_else():
+    """Test that #else after #else raises an error."""
+    f_obj = FakeFile("header.h", [
+        "#if 1\n",
+        "X\n",
+        "#else\n",
+        "Y\n",
+        "#else\n",
+        "Z\n",
+        "#endif\n"
+    ])
+    with pytest.raises(ParseError) as excinfo:
+        "".join(preprocess(f_obj))
+    assert "#else after #else" in str(excinfo.value)
+
+
 def test_if_with_parentheses():
     f_obj = FakeFile("header.h", [
         "#if (1 + 2) * 3\n",
@@ -354,3 +370,27 @@ def test_elif_stops_at_first_true():
     ])
     expected = "B\n"
     run_case(f_obj, expected)
+
+
+def test_if_with_invalid_expression():
+    """Test #if with syntax error in expression."""
+    f_obj = FakeFile("header.h", [
+        "#if 1 (\n",
+        "X\n",
+        "#endif\n"
+    ])
+    with pytest.raises(ParseError, match="Error evaluating #if"):
+        "".join(preprocess(f_obj))
+
+
+def test_elif_with_invalid_expression():
+    """Test #elif with syntax error in expression."""
+    f_obj = FakeFile("header.h", [
+        "#if 0\n",
+        "A\n",
+        "#elif 1 / 0\n",
+        "B\n",
+        "#endif\n"
+    ])
+    with pytest.raises(ParseError, match="Error evaluating #elif"):
+        "".join(preprocess(f_obj))

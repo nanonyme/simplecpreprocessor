@@ -266,3 +266,76 @@ def test_missing_closing_paren_in_defined():
     defines = Defines({})
     with pytest.raises(SyntaxError):
         evaluate_expression(tokens, defines)
+
+
+def test_unexpected_token_after_expression():
+    """Test that extra tokens after a complete expression raise an error."""
+    tokens = make_tokens(["1", "+", "2", "extra"])
+    defines = Defines({})
+    with pytest.raises(SyntaxError, match="Unexpected token"):
+        evaluate_expression(tokens, defines)
+
+
+def test_unexpected_end_in_parse_primary():
+    """Test parse_primary when token stream ends unexpectedly."""
+    # This tests the case where we're in the middle of parsing and run out
+    # Creating an expression that consumes all tokens in _parse_primary
+    tokens = make_tokens(["1", "+"])
+    defines = Defines({})
+    with pytest.raises(SyntaxError, match="Unexpected end of expression"):
+        evaluate_expression(tokens, defines)
+
+
+def test_defined_without_identifier():
+    """Test defined() with no identifier following."""
+    # Create tokens: just "defined" with nothing after
+    tokens = [Token.from_string(0, "defined", TokenType.IDENTIFIER)]
+    defines = Defines({})
+    with pytest.raises(SyntaxError, match="Expected identifier after"):
+        evaluate_expression(tokens, defines)
+
+
+def test_defined_with_parens_no_identifier():
+    """Test defined( with no identifier inside parentheses."""
+    # Create tokens: "defined" "(" ")" - this will use ")" as identifier
+    # and then fail to find closing paren
+    tokens = [
+        Token.from_string(0, "defined", TokenType.IDENTIFIER),
+        Token.from_string(0, "(", TokenType.SYMBOL),
+        Token.from_string(0, ")", TokenType.SYMBOL)
+    ]
+    defines = Defines({})
+    with pytest.raises(SyntaxError, match="Missing closing paren"):
+        evaluate_expression(tokens, defines)
+
+
+def test_defined_with_parens_truncated():
+    """Test defined( with token stream ending."""
+    # This tests line 174 - when we have "defined (" but no more tokens
+    from simplecpreprocessor.tokens import Token, TokenType
+
+    # Manually create scenario where after "defined (", no more tokens
+    tokens = [
+        Token.from_string(0, "defined", TokenType.IDENTIFIER),
+        Token.from_string(0, "(", TokenType.SYMBOL)
+    ]
+    defines = Defines({})
+    with pytest.raises(SyntaxError, match="Expected identifier in defined"):
+        evaluate_expression(tokens, defines)
+
+
+def test_expression_token_repr():
+    """Test ExpressionToken __repr__ for coverage."""
+    from simplecpreprocessor.expression import ExpressionToken
+    token = ExpressionToken("NUMBER", "42")
+    assert "ExprToken" in repr(token)
+    assert "NUMBER" in repr(token)
+    assert "42" in repr(token)
+
+
+def test_expression_token_attributes():
+    """Test ExpressionToken attributes for coverage."""
+    from simplecpreprocessor.expression import ExpressionToken
+    token = ExpressionToken("NUMBER", "42")
+    assert token.type == "NUMBER"
+    assert token.value == "42"
