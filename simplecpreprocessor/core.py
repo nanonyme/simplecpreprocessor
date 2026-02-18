@@ -40,6 +40,17 @@ class Defines:
         return key in self.defines
 
 
+class ConditionFrame:
+    """Represents a conditional compilation block (#if/#ifdef/#ifndef)."""
+
+    def __init__(self, tag, condition, line_no):
+        self.tag = tag
+        self.condition = condition
+        self.line_no = line_no
+        self.branch_taken = False
+        self.currently_active = False
+
+
 class Preprocessor:
 
     def __init__(self, line_ending=tokens.DEFAULT_LINE_ENDING,
@@ -49,8 +60,7 @@ class Preprocessor:
         self.ignore_headers = ignore_headers
         self.include_once = {}
         self.defines = Defines(platform_constants)
-        self.constraints = []
-        self.ignore = False
+        self.condition_stack = []
         self.line_ending = line_ending
         self.last_constraint = None
         self.header_stack = []
@@ -62,8 +72,15 @@ class Preprocessor:
             self.headers = header_handler
             self.headers.add_include_paths(include_paths)
 
+    def _should_ignore(self):
+        """Check if we should ignore content at the current nesting level."""
+        for frame in self.condition_stack:
+            if not frame.currently_active:
+                return True
+        return False
+
     def process_define(self, **kwargs):
-        if self.ignore:
+        if self._should_ignore():
             return
         chunk = kwargs["chunk"]
         for i, tokenized in enumerate(chunk):
@@ -74,45 +91,33 @@ class Preprocessor:
 
     def process_endif(self, **kwargs):
         line_no = kwargs["line_no"]
-        if not self.constraints:
+        if not self.condition_stack:
             fmt = "Unexpected #endif on line %s"
             raise exceptions.ParseError(fmt % line_no)
-        (constraint_type, constraint, ignore,
-         original_line_no) = self.constraints.pop()
-        if ignore:
-            self.ignore = False
-        self.last_constraint = constraint, constraint_type, original_line_no
+        frame = self.condition_stack.pop()
+        self.last_constraint = (
+            frame.condition, frame.tag, frame.line_no
+        )
 
     def process_else(self, **kwargs):
         line_no = kwargs["line_no"]
-        if not self.constraints:
+        if not self.condition_stack:
             fmt = "Unexpected #else on line %s"
             raise exceptions.ParseError(fmt % line_no)
-        constraint_type, constraint, ignore, _ = self.constraints.pop()
+        frame = self.condition_stack[-1]
 
-        # For IF/ELIF, check if any branch was taken
-        if constraint_type in (Tag.IF, Tag.ELIF):
-            branch_was_taken = constraint
-            if branch_was_taken:
-                # A branch was already taken, don't take else
-                ignore = True
-                if not self.ignore:
-                    self.ignore = True
-            else:
-                # No branch was taken, take the else
-                ignore = False
-                if self.ignore:
-                    self.ignore = False
+        if frame.tag == Tag.ELSE:
+            fmt = "#else after #else on line %s"
+            raise exceptions.ParseError(fmt % line_no)
+
+        # Take the else branch only if no previous branch was taken
+        if not frame.branch_taken:
+            frame.currently_active = True
+            frame.branch_taken = True
         else:
-            # Original logic for IFDEF/IFNDEF
-            if self.ignore and ignore:
-                ignore = False
-                self.ignore = False
-            elif not self.ignore and not ignore:
-                ignore = True
-                self.ignore = True
+            frame.currently_active = False
 
-        self.constraints.append((Tag.ELSE, constraint, ignore, line_no))
+        frame.tag = Tag.ELSE
 
     def process_ifdef(self, **kwargs):
         chunk = kwargs["chunk"]
@@ -121,11 +126,17 @@ class Preprocessor:
             if not token.whitespace:
                 condition = token.value
                 break
-        if not self.ignore and condition not in self.defines:
-            self.ignore = True
-            self.constraints.append((Tag.IFDEF, condition, True, line_no))
+
+        frame = ConditionFrame(Tag.IFDEF, condition, line_no)
+        parent_ignoring = self._should_ignore()
+
+        if not parent_ignoring and condition in self.defines:
+            frame.currently_active = True
+            frame.branch_taken = True
         else:
-            self.constraints.append((Tag.IFDEF, condition, False, line_no))
+            frame.currently_active = False
+
+        self.condition_stack.append(frame)
 
     def process_pragma(self, **kwargs):
         chunk = kwargs["chunk"]
@@ -165,11 +176,17 @@ class Preprocessor:
             if not token.whitespace:
                 condition = token.value
                 break
-        if not self.ignore and condition in self.defines:
-            self.ignore = True
-            self.constraints.append((Tag.IFNDEF, condition, True, line_no))
+
+        frame = ConditionFrame(Tag.IFNDEF, condition, line_no)
+        parent_ignoring = self._should_ignore()
+
+        if not parent_ignoring and condition not in self.defines:
+            frame.currently_active = True
+            frame.branch_taken = True
         else:
-            self.constraints.append((Tag.IFNDEF, condition, False, line_no))
+            frame.currently_active = False
+
+        self.condition_stack.append(frame)
 
     def process_undef(self, **kwargs):
         chunk = kwargs["chunk"]
@@ -189,66 +206,65 @@ class Preprocessor:
             fmt = "Error evaluating #if on line %s: %s"
             raise exceptions.ParseError(fmt % (line_no, str(e)))
 
-        # Store whether this branch was taken in the constraint field
-        branch_taken = condition_met
-        if not self.ignore and not condition_met:
-            self.ignore = True
-            self.constraints.append((Tag.IF, branch_taken, True, line_no))
+        frame = ConditionFrame(Tag.IF, result, line_no)
+        parent_ignoring = self._should_ignore()
+
+        if not parent_ignoring and condition_met:
+            frame.currently_active = True
+            frame.branch_taken = True
         else:
-            self.constraints.append((Tag.IF, branch_taken, False, line_no))
+            frame.currently_active = False
+
+        self.condition_stack.append(frame)
 
     def process_elif(self, **kwargs):
         chunk = kwargs["chunk"]
         line_no = kwargs["line_no"]
-        if not self.constraints:
+        if not self.condition_stack:
             fmt = "Unexpected #elif on line %s"
             raise exceptions.ParseError(fmt % line_no)
 
-        constraint_type, constraint, ignore, original_line_no = (
-            self.constraints.pop()
-        )
+        frame = self.condition_stack[-1]
 
-        if constraint_type == Tag.ELSE:
+        if frame.tag == Tag.ELSE:
             fmt = "#elif after #else on line %s"
             raise exceptions.ParseError(fmt % line_no)
 
-        # Check if any previous branch was taken
-        # For IF/ELIF, constraint stores whether that branch was taken
-        previous_branch_taken = constraint if constraint_type in (
-            Tag.IF, Tag.ELIF
-        ) else (not ignore)
+        # If a previous branch was taken, skip this elif
+        if frame.branch_taken:
+            frame.currently_active = False
+            frame.tag = Tag.ELIF
+            return
 
-        if previous_branch_taken:
-            # A previous branch was taken, so ignore this elif
-            branch_taken = True  # Mark that a branch was taken
-            ignore = True
-            if not self.ignore:
-                self.ignore = True
+        # No previous branch taken, evaluate this elif's condition
+        try:
+            result = expression.evaluate_expression(chunk, self.defines)
+            condition_met = result != 0
+        except (SyntaxError, ZeroDivisionError) as e:
+            fmt = "Error evaluating #elif on line %s: %s"
+            raise exceptions.ParseError(fmt % (line_no, str(e)))
+
+        parent_ignoring = self._should_ignore_at_level(
+            len(self.condition_stack) - 1
+        )
+
+        if not parent_ignoring and condition_met:
+            frame.currently_active = True
+            frame.branch_taken = True
         else:
-            # No previous branch taken, evaluate this elif's condition
-            try:
-                result = expression.evaluate_expression(chunk, self.defines)
-                condition_met = result != 0
-            except (SyntaxError, ZeroDivisionError) as e:
-                fmt = "Error evaluating #elif on line %s: %s"
-                raise exceptions.ParseError(fmt % (line_no, str(e)))
+            frame.currently_active = False
 
-            if condition_met:
-                # This branch's condition is met
-                branch_taken = True
-                ignore = False
-                if self.ignore:
-                    self.ignore = False
-            else:
-                # This branch's condition is not met
-                branch_taken = False
-                ignore = True
-                # self.ignore should already be True
+        frame.tag = Tag.ELIF
 
-        self.constraints.append((Tag.ELIF, branch_taken, ignore, line_no))
+    def _should_ignore_at_level(self, level):
+        """Check if we should ignore at a specific stack level."""
+        for i in range(level):
+            if not self.condition_stack[i].currently_active:
+                return True
+        return False
 
     def process_source_chunks(self, chunk):
-        if not self.ignore:
+        if not self._should_ignore():
             for token in self.token_expander.expand_tokens(chunk):
                 if self.fold_strings_to_null and is_string(token):
                     yield "NULL"
@@ -390,14 +406,14 @@ class Preprocessor:
                     yield token
         self.check_fullfile_guard()
         self.header_stack.pop()
-        if not self.header_stack and self.constraints:
-            constraint_type, name, _, line_no = self.constraints[-1]
+        if not self.header_stack and self.condition_stack:
+            frame = self.condition_stack[-1]
             fmt = (
                 "{tag} {name} from line {line_no} left open"
                 .format(
-                    tag=constraint_type.value,
-                    name=name,
-                    line_no=line_no
+                    tag=frame.tag.value,
+                    name=frame.condition,
+                    line_no=frame.line_no
                 )
             )
             raise exceptions.ParseError(fmt)
