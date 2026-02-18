@@ -1,6 +1,6 @@
 import enum
 
-from . import filesystem, tokens, platform, exceptions
+from . import filesystem, tokens, platform, exceptions, expression
 from .tokens import TokenType, is_string
 
 
@@ -8,7 +8,9 @@ class Tag(enum.Enum):
     PRAGMA_ONCE = "#pragma_once"
     IFDEF = "#ifdef"
     IFNDEF = "#ifndef"
+    IF = "#if"
     ELSE = "#else"
+    ELIF = "#elif"
 
 
 def constants_to_token_constants(constants):
@@ -159,6 +161,53 @@ class Preprocessor:
                 undefine = token.value
                 del self.defines[undefine]
                 return
+
+    def process_if(self, **kwargs):
+        chunk = kwargs["chunk"]
+        line_no = kwargs["line_no"]
+        try:
+            result = expression.evaluate_expression(chunk, self.defines)
+            condition_met = result != 0
+        except (SyntaxError, ZeroDivisionError) as e:
+            fmt = "Error evaluating #if on line %s: %s"
+            raise exceptions.ParseError(fmt % (line_no, str(e)))
+
+        if not self.ignore and not condition_met:
+            self.ignore = True
+            self.constraints.append((Tag.IF, result, True, line_no))
+        else:
+            self.constraints.append((Tag.IF, result, False, line_no))
+
+    def process_elif(self, **kwargs):
+        chunk = kwargs["chunk"]
+        line_no = kwargs["line_no"]
+        if not self.constraints:
+            fmt = "Unexpected #elif on line %s"
+            raise exceptions.ParseError(fmt % line_no)
+
+        constraint_type, constraint, ignore, original_line_no = (
+            self.constraints.pop()
+        )
+
+        if constraint_type == Tag.ELSE:
+            fmt = "#elif after #else on line %s"
+            raise exceptions.ParseError(fmt % line_no)
+
+        try:
+            result = expression.evaluate_expression(chunk, self.defines)
+            condition_met = result != 0
+        except (SyntaxError, ZeroDivisionError) as e:
+            fmt = "Error evaluating #elif on line %s: %s"
+            raise exceptions.ParseError(fmt % (line_no, str(e)))
+
+        if self.ignore and ignore and condition_met:
+            ignore = False
+            self.ignore = False
+        elif not ignore:
+            ignore = True
+            self.ignore = True
+
+        self.constraints.append((Tag.ELIF, result, ignore, line_no))
 
     def process_source_chunks(self, chunk):
         if not self.ignore:
