@@ -100,11 +100,7 @@ class ExpressionParser:
         """Parse expression with precedence climbing."""
         left = self._parse_primary()
 
-        while True:
-            token = self.lexer.peek()
-            if token is None:
-                break
-
+        while (token := self.lexer.peek()) is not None:
             op = token.value
             # Stop at closing parenthesis
             if op == ")":
