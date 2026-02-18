@@ -14,8 +14,17 @@ behaviour.
 Gotchas
 ---------
 
-Supported macros: ifdef, ifndef, define, undef, include, else,
+Supported macros: ifdef, ifndef, if, elif, define, undef, include, else,
 pragma (only "once")
+
+The #if and #elif directives support constant expression evaluation including:
+ * Integer constants
+ * Arithmetic operators: +, -, *, /, %
+ * Comparison operators: ==, !=, <, >, <=, >=
+ * Logical operators: &&, ||, !
+ * Bitwise operators: &, |, ^
+ * The defined() operator (with or without parentheses)
+ * Parentheses for grouping
 
 If using for FFI, you may want to ignore some system headers eg for types
 
