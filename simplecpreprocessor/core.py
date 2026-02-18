@@ -88,13 +88,30 @@ class Preprocessor:
         if not self.constraints:
             fmt = "Unexpected #else on line %s"
             raise exceptions.ParseError(fmt % line_no)
-        _, constraint, ignore, _ = self.constraints.pop()
-        if self.ignore and ignore:
-            ignore = False
-            self.ignore = False
-        elif not self.ignore and not ignore:
-            ignore = True
-            self.ignore = True
+        constraint_type, constraint, ignore, _ = self.constraints.pop()
+
+        # For IF/ELIF, check if any branch was taken
+        if constraint_type in (Tag.IF, Tag.ELIF):
+            branch_was_taken = constraint
+            if branch_was_taken:
+                # A branch was already taken, don't take else
+                ignore = True
+                if not self.ignore:
+                    self.ignore = True
+            else:
+                # No branch was taken, take the else
+                ignore = False
+                if self.ignore:
+                    self.ignore = False
+        else:
+            # Original logic for IFDEF/IFNDEF
+            if self.ignore and ignore:
+                ignore = False
+                self.ignore = False
+            elif not self.ignore and not ignore:
+                ignore = True
+                self.ignore = True
+
         self.constraints.append((Tag.ELSE, constraint, ignore, line_no))
 
     def process_ifdef(self, **kwargs):
@@ -172,11 +189,13 @@ class Preprocessor:
             fmt = "Error evaluating #if on line %s: %s"
             raise exceptions.ParseError(fmt % (line_no, str(e)))
 
+        # Store whether this branch was taken in the constraint field
+        branch_taken = condition_met
         if not self.ignore and not condition_met:
             self.ignore = True
-            self.constraints.append((Tag.IF, result, True, line_no))
+            self.constraints.append((Tag.IF, branch_taken, True, line_no))
         else:
-            self.constraints.append((Tag.IF, result, False, line_no))
+            self.constraints.append((Tag.IF, branch_taken, False, line_no))
 
     def process_elif(self, **kwargs):
         chunk = kwargs["chunk"]
@@ -193,21 +212,40 @@ class Preprocessor:
             fmt = "#elif after #else on line %s"
             raise exceptions.ParseError(fmt % line_no)
 
-        try:
-            result = expression.evaluate_expression(chunk, self.defines)
-            condition_met = result != 0
-        except (SyntaxError, ZeroDivisionError) as e:
-            fmt = "Error evaluating #elif on line %s: %s"
-            raise exceptions.ParseError(fmt % (line_no, str(e)))
+        # Check if any previous branch was taken
+        # For IF/ELIF, constraint stores whether that branch was taken
+        previous_branch_taken = constraint if constraint_type in (
+            Tag.IF, Tag.ELIF
+        ) else (not ignore)
 
-        if self.ignore and ignore and condition_met:
-            ignore = False
-            self.ignore = False
-        elif not ignore:
+        if previous_branch_taken:
+            # A previous branch was taken, so ignore this elif
+            branch_taken = True  # Mark that a branch was taken
             ignore = True
-            self.ignore = True
+            if not self.ignore:
+                self.ignore = True
+        else:
+            # No previous branch taken, evaluate this elif's condition
+            try:
+                result = expression.evaluate_expression(chunk, self.defines)
+                condition_met = result != 0
+            except (SyntaxError, ZeroDivisionError) as e:
+                fmt = "Error evaluating #elif on line %s: %s"
+                raise exceptions.ParseError(fmt % (line_no, str(e)))
 
-        self.constraints.append((Tag.ELIF, result, ignore, line_no))
+            if condition_met:
+                # This branch's condition is met
+                branch_taken = True
+                ignore = False
+                if self.ignore:
+                    self.ignore = False
+            else:
+                # This branch's condition is not met
+                branch_taken = False
+                ignore = True
+                # self.ignore should already be True
+
+        self.constraints.append((Tag.ELIF, branch_taken, ignore, line_no))
 
     def process_source_chunks(self, chunk):
         if not self.ignore:
