@@ -16,6 +16,9 @@ coverage:
         target: auto
         threshold: 0.5%
 
+fixes:
+  - "simplecpreprocessor/::"
+
 ignore:
   - "simplecpreprocessor/__init__.py"
   - "simplecpreprocessor/__main__.py"
