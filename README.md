@@ -1,5 +1,7 @@
 # simplepreprocessor
 
+[![codecov](https://codecov.io/gh/nanonyme/simplecpreprocessor/branch/main/graph/badge.svg)](https://codecov.io/gh/nanonyme/simplecpreprocessor)
+
 Usage
 ---------
 
