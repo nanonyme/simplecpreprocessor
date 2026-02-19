@@ -263,3 +263,53 @@ def test_no_fullfile_guard_ifndef():
     assert not preprocessor.skip_file("other.h"), (
         "%s -> %s" % (preprocessor.include_once,
                       preprocessor.defines))
+
+
+def test_include_u8_string():
+    """Test include with u8 prefix (UTF-8 string literal)."""
+    f_obj = FakeFile("header.h", ['#include u8"other.h"\n'])
+    handler = FakeHandler({"other.h": ["1\n"]})
+    ret = preprocess(f_obj, header_handler=handler)
+    assert "".join(ret) == "1\n"
+
+
+def test_include_u_string():
+    """Test include with u prefix (char16_t string literal)."""
+    f_obj = FakeFile("header.h", ['#include u"other.h"\n'])
+    handler = FakeHandler({"other.h": ["1\n"]})
+    ret = preprocess(f_obj, header_handler=handler)
+    assert "".join(ret) == "1\n"
+
+
+def test_include_capital_u_string():
+    """Test include with U prefix (char32_t string literal)."""
+    f_obj = FakeFile("header.h", ['#include U"other.h"\n'])
+    handler = FakeHandler({"other.h": ["1\n"]})
+    ret = preprocess(f_obj, header_handler=handler)
+    assert "".join(ret) == "1\n"
+
+
+def test_include_l_string():
+    """Test include with L prefix (wide string literal)."""
+    f_obj = FakeFile("header.h", ['#include L"other.h"\n'])
+    handler = FakeHandler({"other.h": ["1\n"]})
+    ret = preprocess(f_obj, header_handler=handler)
+    assert "".join(ret) == "1\n"
+
+
+def test_include_invalid_string_format():
+    """Test include with invalid string format (no closing quote)."""
+    f_obj = FakeFile("header.h", ['#include "other.h\n'])
+    with pytest.raises(ParseError) as excinfo:
+        "".join(preprocess(f_obj))
+    assert "Invalid include" in str(excinfo.value)
+
+
+def test_include_angle_bracket_eof_no_newline():
+    """Test include with angle bracket missing '>' at EOF after tokens."""
+    # Simulate the case where the loop exhausts without finding '>'
+    # This happens when there's content but no '>' and no newline at EOF
+    f_obj = FakeFile("header.h", ['#include <other.h extra'])
+    with pytest.raises(ParseError) as excinfo:
+        "".join(preprocess(f_obj))
+    assert "missing '>'" in str(excinfo.value)

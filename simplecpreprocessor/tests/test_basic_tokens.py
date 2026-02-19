@@ -78,3 +78,15 @@ def test_string_folding_inside_condition():
     ])
     ret = preprocess(f_obj, fold_strings_to_null=True)
     assert "".join(ret) == "const char* foo = NULL;\n"
+
+
+def test_empty_lines():
+    """Test that empty lines are handled correctly."""
+    f_obj = FakeFile("header.h", [
+        "#define FOO 1\n",
+        "\n",
+        "\n",
+        "FOO\n"
+    ])
+    expected = "\n\n1\n"
+    run_case(f_obj, expected)

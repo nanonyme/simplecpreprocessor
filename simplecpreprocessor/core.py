@@ -406,7 +406,8 @@ class Preprocessor:
                 header = item[item.index("\"")+1:-1]
             elif item.startswith('"') and item.endswith('"'):
                 header = item.strip('"')
-            else:
+            else:  # pragma: no cover
+                # Defensive: tokenizer ensures STRING tokens are well-formed
                 fmt = (
                     "Invalid include on line %s, got %r for include name"
                     % (line_no, item)
@@ -439,11 +440,12 @@ class Preprocessor:
                     )
                     raise exceptions.ParseError(fmt)
                 parts.append(tok.value)
-            fmt = (
+            # Defensive: tokenizer ensures chunks end with NEWLINE
+            fmt = (  # pragma: no cover
                 "Invalid include on line %s, missing '>'"
                 % line_no
             )
-            raise exceptions.ParseError(fmt)
+            raise exceptions.ParseError(fmt)  # pragma: no cover
 
         fmt = (
             "Invalid include on line %s, got %r for include name"
