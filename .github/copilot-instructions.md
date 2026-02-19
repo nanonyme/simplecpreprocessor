@@ -15,6 +15,8 @@ Follow the development, linting, and testing process described in
   the 79‑character limit.
 - **Testing**: Run tests with
   `pytest -v --cov=simplecpreprocessor --cov-config .coveragerc --cov-report=term-missing`
-- **Coverage**: Maintain or improve test coverage; never decrease it.
+- **Coverage**: Maintain or improve test coverage; never decrease it. This includew branch coverage.
+- Failure handling in branches is expected to be handled by creating invalid C code. If it's not possible to cover branch with streaming input and hitting it requires direct manipulation, the branch needs to be marked as no cover.
+- Evaluate earlier no cover cases as to whether they should be covered by tests when implementing new functionality.
 
 When generating code, apply these rules before returning the final output.
