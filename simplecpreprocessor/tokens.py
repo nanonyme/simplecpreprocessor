@@ -56,17 +56,137 @@ class TokenExpander:
         self.seen = set()
 
     def expand_tokens(self, tokens):
-        for token in tokens:
+        # Convert to list to allow lookahead
+        token_list = list(tokens)
+        i = 0
+        while i < len(token_list):
+            token = token_list[i]
             if token.value in self.seen:
                 yield token
+                i += 1
             else:
                 resolved = self.defines.get(token.value, token)
                 if resolved is token:
                     yield token
+                    i += 1
                 else:
-                    self.seen.add(token.value)
-                    yield from self.expand_tokens(resolved)
-                    self.seen.remove(token.value)
+                    # Import FunctionLikeMacro here to avoid circular import
+                    from .core import FunctionLikeMacro
+                    if isinstance(resolved, FunctionLikeMacro):
+                        # Look ahead for '('
+                        j = i + 1
+                        # Skip whitespace
+                        while j < len(token_list):
+                            if not token_list[j].whitespace:
+                                break
+                            j += 1
+
+                        if j < len(token_list) and token_list[j].value == "(":
+                            # Extract arguments
+                            args, end_pos = self._extract_args(
+                                token_list, j + 1
+                            )
+                            if args is not None:
+                                # Expand the macro
+                                self.seen.add(token.value)
+                                expanded = self._expand_function_macro(
+                                    resolved, args
+                                )
+                                yield from self.expand_tokens(expanded)
+                                self.seen.remove(token.value)
+                                i = end_pos + 1
+                                continue
+                        # No '(' found, don't expand
+                        yield token
+                        i += 1
+                    else:
+                        # Object-like macro
+                        self.seen.add(token.value)
+                        yield from self.expand_tokens(resolved)
+                        self.seen.remove(token.value)
+                        i += 1
+
+    def _extract_args(self, tokens, start):
+        """Extract arguments from a function-like macro call.
+
+        Returns (args, end_pos) where args is a list of token lists,
+        or (None, None) if parsing fails.
+        """
+        args = []
+        current_arg = []
+        paren_depth = 0
+        i = start
+
+        while i < len(tokens):
+            token = tokens[i]
+            if token.value == "(":
+                paren_depth += 1
+                current_arg.append(token)
+            elif token.value == ")":
+                if paren_depth == 0:
+                    # End of argument list
+                    # Add last argument (even if empty)
+                    if current_arg or not args:
+                        args.append(current_arg)
+                    return args, i
+                else:
+                    paren_depth -= 1
+                    current_arg.append(token)
+            elif token.value == "," and paren_depth == 0:
+                # Argument separator
+                args.append(current_arg)
+                current_arg = []
+            else:
+                current_arg.append(token)
+            i += 1
+
+        # No closing ')' found
+        return None, None
+
+    def _expand_function_macro(self, macro, args):
+        """Expand a function-like macro with given arguments.
+
+        Returns a list of tokens.
+        """
+        # Strip leading/trailing whitespace from each arg
+        clean_args = []
+        for arg in args:
+            # Remove leading whitespace
+            start = 0
+            while start < len(arg) and arg[start].whitespace:
+                start += 1
+            # Remove trailing whitespace
+            end = len(arg)
+            while end > start and arg[end-1].whitespace:
+                end -= 1
+            clean_args.append(arg[start:end])
+
+        # Expand arguments first (recursive expansion)
+        # Create a fresh expander to avoid recursion guard conflicts
+        expanded_args = []
+        for arg in clean_args:
+            expander = TokenExpander(self.defines)
+            expanded_arg = list(expander.expand_tokens(arg))
+            expanded_args.append(expanded_arg)
+
+        # Build parameter -> argument mapping
+        param_map = {}
+        for i, param in enumerate(macro.params):
+            if i < len(expanded_args):
+                param_map[param] = expanded_args[i]
+            else:
+                param_map[param] = []  # Missing argument
+
+        # Substitute parameters in body
+        result = []
+        for token in macro.body:
+            if token.value in param_map:
+                # Replace with argument
+                result.extend(param_map[token.value])
+            else:
+                result.append(token)
+
+        return result
 
 
 class Tokenizer:

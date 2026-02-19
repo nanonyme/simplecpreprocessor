@@ -23,6 +23,14 @@ def constants_to_token_constants(constants):
 TOKEN_CONSTANTS = constants_to_token_constants(platform.PLATFORM_CONSTANTS)
 
 
+class FunctionLikeMacro:
+    """Represents a function-like macro with parameters."""
+
+    def __init__(self, params, body):
+        self.params = params
+        self.body = body
+
+
 class Defines:
     def __init__(self, base):
         self.defines = base.copy()
@@ -90,6 +98,62 @@ class Preprocessor:
         else:  # pragma: no cover
             # Defensive: should never happen as tokenizer ensures non-ws tokens
             return
+
+        # Check if this is a function-like macro
+        # Function-like macros have '(' immediately after name (no whitespace)
+        if i+1 < len(chunk) and chunk[i+1].value == "(":
+            # Parse parameters
+            params = []
+            j = i + 2  # Start after '('
+            param_start = j
+            paren_depth = 0
+
+            while j < len(chunk):
+                token = chunk[j]
+                if token.value == "(" and not token.whitespace:
+                    paren_depth += 1
+                elif token.value == ")" and not token.whitespace:
+                    if paren_depth == 0:
+                        # End of parameter list
+                        # Add last parameter if any
+                        if param_start < j:
+                            param_tokens = chunk[param_start:j]
+                            param_name = None
+                            for pt in param_tokens:
+                                if not pt.whitespace:
+                                    param_name = pt.value
+                                    break
+                            if param_name:
+                                params.append(param_name)
+                        # Body starts after ')' and any whitespace
+                        body_start = j + 1
+                        while (body_start < len(chunk) and
+                               chunk[body_start].whitespace):
+                            body_start += 1
+                        body = chunk[body_start:-1]  # Exclude newline
+                        self.defines[define_name] = FunctionLikeMacro(
+                            params, body
+                        )
+                        return
+                    else:
+                        paren_depth -= 1
+                elif token.value == "," and paren_depth == 0:
+                    # Parameter separator
+                    param_tokens = chunk[param_start:j]
+                    param_name = None
+                    for pt in param_tokens:
+                        if not pt.whitespace:
+                            param_name = pt.value
+                            break
+                    if param_name:
+                        params.append(param_name)
+                    param_start = j + 1
+                j += 1
+
+            # If we get here, something went wrong
+            # Fall through to object-like macro handling
+
+        # Object-like macro
         self.defines[define_name] = chunk[i+2:-1]
 
     def process_endif(self, **kwargs):

@@ -7,3 +7,4 @@ htmlcov
 
 # Visual Studio Code settings
 .vscode/
+*.py,cover
