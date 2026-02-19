@@ -394,3 +394,35 @@ def test_elif_with_invalid_expression():
     ])
     with pytest.raises(ParseError, match="Error evaluating #elif"):
         "".join(preprocess(f_obj))
+
+
+def test_nested_elif_outer_false():
+    """Test elif inside a false outer if condition."""
+    f_obj = FakeFile("header.h", [
+        "#if 0\n",
+        "#if 0\n",
+        "A\n",
+        "#elif 1\n",
+        "B\n",
+        "#endif\n",
+        "#endif\n"
+    ])
+    expected = ""
+    run_case(f_obj, expected)
+
+
+def test_deeply_nested_elif_inner():
+    """Test elif deep inside nested conditionals with active parents."""
+    f_obj = FakeFile("header.h", [
+        "#if 1\n",      # level 0: active
+        "#if 1\n",      # level 1: active
+        "#if 0\n",      # level 2: not active
+        "A\n",
+        "#elif 1\n",    # This should be active since parents are active
+        "B\n",
+        "#endif\n",
+        "#endif\n",
+        "#endif\n"
+    ])
+    expected = "B\n"
+    run_case(f_obj, expected)

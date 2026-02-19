@@ -223,7 +223,8 @@ class Tokenizer:
     def _scan_line(self, line_no, line):
         self.line_no = line_no
         tokens, remainder = self._scanner.scan(line)
-        if remainder:
+        if remainder:  # pragma: no cover
+            # Defensive: scanner patterns should match all input
             raise SyntaxError(
                 f"Unrecognized input: {remainder!r}"
             )
@@ -238,7 +239,8 @@ class Tokenizer:
             tokens = self._scan_line(line_no, line)
             try:
                 token = next(tokens)
-            except StopIteration:
+            except StopIteration:  # pragma: no cover
+                # Defensive: scanner always produces at least NEWLINE
                 continue  # skip empty lines
 
             lookahead = None

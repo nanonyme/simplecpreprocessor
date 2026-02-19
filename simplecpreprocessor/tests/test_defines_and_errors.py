@@ -321,3 +321,11 @@ def test_repeated_macro():
         'A A\n', ])
     ret = preprocess(f_obj)
     assert "".join(ret) == "value value\n"
+
+
+def test_pragma_whitespace_only():
+    """Test pragma with only whitespace after the directive."""
+    f_obj = FakeFile("header.h", ["#pragma   \n"])
+    with pytest.raises(ParseError) as excinfo:
+        "".join(preprocess(f_obj))
+    assert "Unsupported pragma" in str(excinfo.value)
